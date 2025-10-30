@@ -20,7 +20,7 @@ async function onSubmit(e: Event) {
   }
   busy.value = true;
   try {
-    const data = await verify2fa({ challengeId: challengeId.value, code: code.value.trim() });
+    const data = await verify2fa({ challengeId: challengeId.value, code: code.value.trim(), email: email.value });
     const token = data.access_token || data.token || data.jwt;
     if (!token) throw new Error('Respuesta inválida');
     localStorage.setItem('authToken', token);

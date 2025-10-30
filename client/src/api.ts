@@ -19,7 +19,7 @@ export async function login(payload: { email: string; password: string; method?:
   return data;
 }
 
-export async function verify2fa(payload: { challengeId: string; code: string }) {
+export async function verify2fa(payload: { challengeId: string; code: string; email?: string }) {
   const { data } = await api.post('/auth/2fa/verify', payload);
   return data;
 }

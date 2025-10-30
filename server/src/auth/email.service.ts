@@ -3,6 +3,51 @@ import nodemailer from 'nodemailer';
 
 @Injectable()
 export class EmailService {
+  private async sendWithSendGrid(to: string, subject: string, html: string) {
+    const apiKey = process.env.SENDGRID_API_KEY;
+    if (!apiKey) return null;
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+    if (!from) throw new Error('SENDGRID: falta FROM (SMTP_FROM o SMTP_USER)');
+    const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: from },
+        subject,
+        content: [{ type: 'text/html', value: html }],
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`SendGrid error ${resp.status}: ${text}`);
+    }
+    return { messageId: resp.headers.get('x-message-id') || 'sendgrid' } as any;
+  }
+
+  private async sendWithResend(to: string, subject: string, html: string) {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) return null;
+    const from = process.env.SMTP_FROM || 'onboarding@resend.dev';
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from, to, subject, html }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Resend error ${resp.status}: ${text}`);
+    }
+    const json: any = await resp.json();
+    return { messageId: json?.id || 'resend' } as any;
+  }
+
   private buildTransport(preferStartTls = false) {
     const useService = String(process.env.SMTP_SERVICE || '').toLowerCase();
     const hasExplicitHost = Boolean(process.env.SMTP_HOST);
@@ -55,16 +100,39 @@ export class EmailService {
   }
 
   async sendMail(to: string, subject: string, html: string) {
+    const debug = String(process.env.SMTP_DEBUG || 'false') === 'true';
+    // 1) Preferir API por HTTP si está disponible
+    if (process.env.SENDGRID_API_KEY) {
+      try {
+        if (debug) console.log('[Email] Intentando SendGrid API');
+        const info = await this.sendWithSendGrid(to, subject, html);
+        if (debug) console.log('[Email] SendGrid OK:', info?.messageId || 'ok');
+        return info;
+      } catch (e: any) {
+        console.error('[Email] SendGrid fallo:', e?.message || e);
+        // Si SendGrid está configurado, no intentes SMTP (evita puertos bloqueados en PaaS)
+        throw e;
+      }
+    }
+    if (process.env.RESEND_API_KEY) {
+      try {
+        if (debug) console.log('[Email] Intentando Resend API');
+        const info = await this.sendWithResend(to, subject, html);
+        if (debug) console.log('[Email] Resend OK:', info?.messageId || 'ok');
+        return info;
+      } catch (e: any) {
+        console.error('[Email] Resend fallo:', e?.message || e);
+        // Si Resend está configurado, no intentes SMTP
+        throw e;
+      }
+    }
+
+    // 2) SMTP (con fallback 465 -> 587 para Gmail)
     const from = process.env.SMTP_FROM || process.env.SMTP_USER;
     if (!from) {
-      // eslint-disable-next-line no-console
       console.error('SMTP_FROM/SMTP_USER no configurado. Imposible enviar correo.');
       throw new Error('Email no configurado');
     }
-
-    const debug = String(process.env.SMTP_DEBUG || 'false') === 'true';
-
-    // Primer intento
     let transporter = this.buildTransport(false);
     try {
       const info = await transporter.sendMail({ from, to, subject, html });
@@ -72,8 +140,6 @@ export class EmailService {
       return info;
     } catch (err: any) {
       if (debug) console.error('SMTP intento 1 falló:', err?.code || '', err?.message || err);
-
-      // Fallback automático: si es Gmail y error de conexión, intentar 587 STARTTLS
       const useService = String(process.env.SMTP_SERVICE || '').toLowerCase();
       const hasExplicitHost = Boolean(process.env.SMTP_HOST);
       const canFallback = !hasExplicitHost && useService === 'gmail' && this.isConnError(err);

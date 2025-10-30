@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="card">
+        <h1>Bienvenido</h1>
+        <p>Se guardó un token tras el login.</p>
+
+        <pre id="tokenBox" style="white-space: pre-wrap; word-break: break-all;"></pre>
+
+        <div style="display:flex; gap: 0.5rem; margin-top: 1rem;">
+          <button id="copyBtn">Copiar token</button>
+          <button id="logoutBtn">Cerrar sesión</button>
+        </div>
+      </section>
+    </main>
+    <script>
+      const token = localStorage.getItem('authToken');
+      const box = document.getElementById('tokenBox');
+      if (!token) {
+        window.location.replace('index.html');
+      } else {
+        box.textContent = token;
+      }
+      document.getElementById('logoutBtn').addEventListener('click', () => {
+        localStorage.removeItem('authToken');
+        window.location.replace('index.html');
+      });
+      document.getElementById('copyBtn').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(token || '');
+          alert('Token copiado');
+        } catch {
+          alert('No se pudo copiar');
+        }
+      });
+    </script>
+  </body>
+  </html>
+

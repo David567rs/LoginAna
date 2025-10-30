@@ -51,6 +51,10 @@ export class AuthService {
     // Enviar email real con link
     const client = process.env.CLIENT_URL || 'http://localhost:5173';
     const verifyUrl = `${client}/verify-email?token=${emailToken}`;
+    if (String(process.env.SMTP_DEBUG || 'false') === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[EmailVerify] CLIENT_URL =', client, 'verifyUrl =', verifyUrl.replace(/token=.*/, 'token=***'));
+    }
     try {
       await this.emailer.sendMail(
         email,
@@ -125,6 +129,10 @@ export class AuthService {
     await doc.updateOne({ emailVerifyToken: emailToken, emailVerifyExpires: emailExp });
     const client = process.env.CLIENT_URL || 'http://localhost:5173';
     const verifyUrl = `${client}/verify-email?token=${emailToken}`;
+    if (String(process.env.SMTP_DEBUG || 'false') === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[EmailVerify][Resend] CLIENT_URL =', client, 'verifyUrl =', verifyUrl.replace(/token=.*/, 'token=***'));
+    }
     try {
       await this.emailer.sendMail(
         doc.email,

@@ -56,6 +56,10 @@ export class AuthController {
     }
     const client = process.env.CLIENT_URL || 'http://localhost:5173';
     const to = `${client}/?emailVerified=${ok ? '1' : '0'}`;
+    if (String(process.env.SMTP_DEBUG || 'false') === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('[VerifyEmail][Redirect] CLIENT_URL =', client, 'to =', to);
+    }
     return res?.redirect(to);
   }
 

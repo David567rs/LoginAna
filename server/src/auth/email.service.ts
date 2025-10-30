@@ -3,8 +3,9 @@ import nodemailer from 'nodemailer';
 
 @Injectable()
 export class EmailService {
-  private transporter = nodemailer.createTransport((() => {
+  private buildTransport(preferStartTls = false) {
     const useService = String(process.env.SMTP_SERVICE || '').toLowerCase();
+    const hasExplicitHost = Boolean(process.env.SMTP_HOST);
     const common: any = {
       auth:
         process.env.SMTP_USER && process.env.SMTP_PASS
@@ -14,27 +15,44 @@ export class EmailService {
       debug: String(process.env.SMTP_DEBUG || 'false') === 'true',
     };
 
-    // Forzar configuración estable para Gmail (App Password requerido)
-    if (useService === 'gmail') {
-      return {
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+    // Preferencia explícita por host/puerto si están configurados
+    if (hasExplicitHost) {
+      return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: String(process.env.SMTP_SECURE || 'false') === 'true',
         ...common,
-      } as any;
+      } as any);
     }
-    // Otras plataformas que soporta nodemailer por "service"
+
+    // Gmail: probar 465 (TLS) por defecto o 587 (STARTTLS) si preferStartTls
+    if (useService === 'gmail') {
+      if (preferStartTls) {
+        return nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, ...common } as any);
+      }
+      return nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, ...common } as any);
+    }
+
+    // Otros servicios soportados por nodemailer
     if (useService) {
-      return { service: process.env.SMTP_SERVICE, ...common } as any;
+      return nodemailer.createTransport({ service: process.env.SMTP_SERVICE, ...common } as any);
     }
-    // Configuración genérica por host/puerto
-    return {
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-      ...common,
-    } as any;
-  })());
+
+    // Predeterminado: 587 STARTTLS
+    return nodemailer.createTransport({ host: 'localhost', port: 587, secure: false, ...common } as any);
+  }
+
+  private isConnError(err: any) {
+    const code = err?.code || '';
+    const msg = String(err?.message || '').toLowerCase();
+    return (
+      code === 'ETIMEDOUT' ||
+      code === 'ECONNECTION' ||
+      msg.includes('timed out') ||
+      msg.includes('getaddrinfo enotfound') ||
+      msg.includes('connection timeout')
+    );
+  }
 
   async sendMail(to: string, subject: string, html: string) {
     const from = process.env.SMTP_FROM || process.env.SMTP_USER;
@@ -43,14 +61,34 @@ export class EmailService {
       console.error('SMTP_FROM/SMTP_USER no configurado. Imposible enviar correo.');
       throw new Error('Email no configurado');
     }
+
+    const debug = String(process.env.SMTP_DEBUG || 'false') === 'true';
+
+    // Primer intento
+    let transporter = this.buildTransport(false);
     try {
-      const info = await this.transporter.sendMail({ from, to, subject, html });
-      // eslint-disable-next-line no-console
-      if (String(process.env.SMTP_DEBUG || 'false') === 'true') console.log('Email sent:', info.messageId);
+      const info = await transporter.sendMail({ from, to, subject, html });
+      if (debug) console.log('Email sent:', info.messageId);
       return info;
     } catch (err: any) {
-      // eslint-disable-next-line no-console
-      console.error('Fallo al enviar correo (SMTP):', err?.message || err);
+      if (debug) console.error('SMTP intento 1 falló:', err?.code || '', err?.message || err);
+
+      // Fallback automático: si es Gmail y error de conexión, intentar 587 STARTTLS
+      const useService = String(process.env.SMTP_SERVICE || '').toLowerCase();
+      const hasExplicitHost = Boolean(process.env.SMTP_HOST);
+      const canFallback = !hasExplicitHost && useService === 'gmail' && this.isConnError(err);
+      if (canFallback) {
+        try {
+          if (debug) console.warn('Reintentando SMTP por STARTTLS (587) para Gmail...');
+          transporter = this.buildTransport(true);
+          const info = await transporter.sendMail({ from, to, subject, html });
+          if (debug) console.log('Email sent (fallback 587):', info.messageId);
+          return info;
+        } catch (err2: any) {
+          if (debug) console.error('SMTP intento 2 (587) falló:', err2?.code || '', err2?.message || err2);
+          throw err2;
+        }
+      }
       throw err;
     }
   }

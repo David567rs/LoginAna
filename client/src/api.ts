@@ -5,12 +5,25 @@ import axios from 'axios';
 const dynamicBase = (() => {
   try {
     const h = window.location?.hostname;
-    if (h && h !== 'localhost') return `http://${h}:3000`;
+    if (h === 'localhost' || h === '127.0.0.1') return `http://${h}:3000`;
   } catch {}
-  return 'http://localhost:3000';
+  return '';
 })();
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || dynamicBase;
+const envBase = (import.meta as any).env?.VITE_API_BASE as string | undefined;
+const API_BASE = envBase || dynamicBase;
+
+// En producción, exige base HTTPS configurada
+(() => {
+  try {
+    const h = window.location?.hostname;
+    const isLocal = h === 'localhost' || h === '127.0.0.1';
+    if (!isLocal) {
+      if (!API_BASE) throw new Error('VITE_API_BASE no configurada en producción');
+      if (API_BASE.startsWith('http://')) throw new Error('VITE_API_BASE debe ser HTTPS en producción');
+    }
+  } catch {}
+})();
 
 export const api = axios.create({ baseURL: API_BASE });
 
